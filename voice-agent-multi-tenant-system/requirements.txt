@@ -42,6 +42,12 @@ anthropic==0.5.1
 deepgram-sdk==2.12.0
 elevenlabs==0.2.26
 
+# LangGraph for agent orchestration
+langgraph>=0.0.19
+langchain-core>=0.0.17
+langchain-openai>=0.0.2
+langchain>=0.0.314
+
 # Storage and GCP services
 google-cloud-storage>=2.9.0
 google-cloud-secret-manager>=2.16.0
