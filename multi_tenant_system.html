@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Tenant Voice Agent</title>
+    <script src="voice_agent_helpers.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f9f9f9;
+            transition: background-color 0.3s ease;
+        }
+        body.listening {
+            background-color: #e6f7ff;
+        }
+        body.interrupting {
+            background-color: #ffecb3; /* warm yellow background when interrupting */
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        #stopAudioBtn {
+            display: none;
+        }
+        body.audio-playing #stopAudioBtn {
+            display: inline-block;
+        }
+        body.can-interrupt::after {
+            content: "Speak to interrupt";
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #ff9800;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.7; }
+            50% { opacity: 1; }
+            100% { opacity: 0.7; }
+        }
+        h1, h2 {
+            color: #2c3e50;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        button.green {
+            background-color: #2ecc71;
+        }
+        button.green:hover {
+            background-color: #27ae60;
+        }
+        button.red {
+            background-color: #e74c3c;
+        }
+        button.red:hover {
+            background-color: #c0392b;
+        }
+        .input-group {
+            display: flex;
+            margin-bottom: 15px;
+        }
+        input, select {
+            flex-grow: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .status {
+            font-size: 14px;
+            margin: 10px 0;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .status.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+        .status.warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+            color: #721c24;
+        }
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .conversation-container {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            background-color: #f8f9fa;
+        }
+        .message {
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            max-width: 80%;
+        }
+        .user {
+            background-color: #dcf8c6;
+            margin-left: auto;
+            border-radius: 8px;
+        }
+        .response {
+            background-color: #f0f0f0;
+            margin-right: auto;
+            border-radius: 8px;
+        }
+        .audio-container {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+        audio {
+            width: 100%;
+            margin-top: 5px;
+        }
+        .agent-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        .greeter {
+            background-color: #9b59b6;
+            color: white;
+        }
+        .technical {
+            background-color: #3498db;
+            color: white;
+        }
+        .billing {
+            background-color: #f1c40f;
+            color: #333;
+        }
+        .general {
+            background-color: #2ecc71;
+            color: white;
+        }
+        .escalation {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .session-info {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-bottom: 15px;
+        }
+        #agentInfo {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .agent-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-weight: bold;
+            margin-right: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Multi-Tenant Voice Agent</h1>
+        
+        <div id="agentInfo">
+            <div class="agent-avatar general">G</div>
+            <div>
+                <h3 style="margin: 0;">Voice Agent</h3>
+                <p style="margin: 0;">Ready to assist when you start the conversation</p>
+            </div>
+        </div>
+        
+        <div class="session-info">
+            Session ID: <span id="sessionId">Not connected</span> | 
+            Customer ID: <span id="customerId">Unknown</span>
+        </div>
+        
+        <div class="card">
+            <h2>Speech Recognition</h2>
+            <div class="controls">
+                <button id="startButton" class="btn btn-primary">Start Listening</button>
+                <button id="stopButton" class="btn btn-danger" disabled>Stop Listening</button>
+                <div id="speechStatus" class="status info">Ready to listen</div>
+                <div id="sttOutput" class="card" style="margin-top: 10px; padding: 10px;"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Conversation</h2>
+            <div id="conversation" class="conversation-container"></div>
+            
+            <div class="input-group">
+                <input type="text" id="messageInput" placeholder="Type your message...">
+                <button id="sendButton">Send</button>
+            </div>
+            
+            <div class="preset-container" style="margin-top: 10px; margin-bottom: 10px;">
+                <select id="presetSelect">
+                    <option value="">-- Select an issue type --</option>
+                    <option value="billing">I have a billing question</option>
+                    <option value="technical">My product isn't working</option>
+                    <option value="general">I need general information</option>
+                    <option value="escalation">I want to speak to a manager</option>
+                </select>
+                <button id="presetButton">Use Preset</button>
+            </div>
+            
+            <div id="agentStatus" class="status info">Not connected</div>
+        </div>
+        
+        <div class="card">
+            <h2>Audio Responses</h2>
+            <div id="audioPlayer"></div>
+            <button id="stopAudioBtn" style="display: none;">Stop Audio</button>
+        </div>
+        
+        <div class="card">
+            <h2>Connection Settings</h2>
+            <div class="input-group">
+                <input type="text" id="customerIdInput" placeholder="Customer ID (optional)">
+            </div>
+            <div class="input-group">
+                <button id="connectButton">Connect to Multi-Tenant System</button>
+                <button id="disconnectButton" disabled>Disconnect</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM fully loaded, initializing voice agent...');
+            // DOM elements - define all elements needed throughout the script
+            console.log('Initializing DOM elements...');
+            const startButton = document.getElementById('startButton');
+            const stopButton = document.getElementById('stopButton');
+            const speechStatus = document.getElementById('speechStatus');
+            const conversation = document.getElementById('conversation');
+            const connectButton = document.getElementById('connectButton');
+            const disconnectButton = document.getElementById('disconnectButton');
+            const customerIdInput = document.getElementById('customerId');
+            const messageInput = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendButton');
+            const agentStatus = document.getElementById('agentStatus');
+            const agentInfo = document.getElementById('agentInfo');
+            const messagesContainer = document.getElementById('messages');
+            const stopAudioBtn = document.getElementById('stopAudioBtn');
+            const sessionIdSpan = document.getElementById('sessionId');
+            const customerIdSpan = document.getElementById('customerId'); // Fix for missing customerIdSpan
+            const presetSelect = document.getElementById('presetSelect');
+            const presetButton = document.getElementById('presetButton');
+            const audioPlayer = document.getElementById('audioPlayer');
+            const interruptButton = document.getElementById('interruptButton'); // Fix for interruptButton
+            
+            // Make elements globally accessible for cross-function access
+            window.connectButton = connectButton;
+            window.disconnectButton = disconnectButton;
+            window.customerIdInput = customerIdInput;
+            window.messageInput = messageInput;
+            window.sendButton = sendButton;
+            window.agentStatus = agentStatus;
+            window.speechStatus = speechStatus;
+            window.agentInfo = agentInfo;
+            window.messagesContainer = messagesContainer;
+            window.startButton = startButton;
+            window.stopButton = stopButton;
+            window.stopAudioBtn = stopAudioBtn;
+            
+            // Debug log important elements
+            console.log('Connect button:', connectButton);
+            console.log('Agent status element:', agentStatus);
+            console.log('Messages container:', messagesContainer);
+            
+            console.log('All DOM elements initialized:', {
+                connectButton: !!connectButton,
+                disconnectButton: !!disconnectButton,
+                customerIdInput: !!customerIdInput
+            });
+            
+            // Initialize state variables
+            let isListening = false;
+            let recognition = null;
+            let currentSessionId = '';
+            let currentCustomerId = '';
+            let currentAgentType = 'greeter';
+            let isConnected = false;
+            let isInterrupting = false;
+            let isPlaying = false;
+            const audioQueue = [];
+            
+            // Initialize speech recognition
+            function initSpeechRecognition() {
+                if ('webkitSpeechRecognition' in window) {
+                    recognition = new webkitSpeechRecognition();
+                    recognition.continuous = true;
+                    recognition.interimResults = true;
+                    recognition.lang = 'en-US'; // Specify language for better accuracy
+                    recognition.maxAlternatives = 3; // Get multiple alternatives
+                    
+                    // Variables for silence detection
+                    window.lastSpeechTimestamp = Date.now();
+                    window.silenceThreshold = 2000; // 2 seconds of silence before sending
+                    window.silenceTimer = null;
+                    window.isProcessingSpeech = false;
+                    
+                    recognition.onstart = function() {
+                        updateStatus(speechStatus, "Listening... (speak clearly)", 'info');
+                        document.body.classList.add('listening');
+                        startButton.disabled = true;
+                        stopButton.disabled = false;
+                    };
+                    
+                    recognition.onresult = function(event) {
+                        let interim = "";
+                        let finalText = "";
+                        
+                        // Update last speech timestamp whenever we get results
+                        window.lastSpeechTimestamp = Date.now();
+                        
+                        // Clear any existing silence timer
+                        if (window.silenceTimer) {
+                            clearTimeout(window.silenceTimer);
+                        }
+                        
+                        for (let i = event.resultIndex; i < event.results.length; ++i) {
+                            if (event.results[i].isFinal) {
+                                // Take the most confident result
+                                finalText += event.results[i][0].transcript;
+                                // Display confidence
+                                let confidence = Math.round(event.results[i][0].confidence * 100);
+                                updateStatus(speechStatus, `Heard with ${confidence}% confidence`, 'success');
+                            } else {
+                                interim += event.results[i][0].transcript;
+                            }
+                        }
+                        
+                        if (finalText) {
+                            messageInput.value = finalText;
+                        }
+                        
+                        if (interim) {
+                            messageInput.value = finalText + " " + interim;
+                        }
+                        
+                        // Start silence detection timer
+                        window.silenceTimer = setTimeout(() => {
+                            const currentText = messageInput.value.trim();
+                            if (currentText && !window.isProcessingSpeech) {
+                                console.log('Silence detected, sending message:', currentText);
+                                window.isProcessingSpeech = true;
+                                sendMessageToMultiTenant(currentText);
+                                messageInput.value = '';
+                                // Will automatically continue listening due to continuous mode
+                            }
+                        }, window.silenceThreshold);
+                    };
+                    
+                    recognition.onerror = function(event) {
+                        updateStatus(speechStatus, `Recognition error: ${event.error}`, 'error');
+                        document.body.classList.remove('listening');
+                        stopListening();
+                    };
+                    
+                    recognition.onend = function() {
+                        document.body.classList.remove('listening');
+                        document.body.classList.remove('interrupting');
+                        
+                        // Reset interruption flag
+                        wasInterruption = window.isInterruption === true;
+                        
+                        console.log('Speech recognition ended, restarting in 500ms');
+                        
+                        // If we're connected, automatically restart after a short delay
+                        // This creates a continuous listening experience even though we may
+                        // temporarily stop to process
+                        if (isConnected && !window.pauseRecognition) {
+                            setTimeout(() => {
+                                window.isProcessingSpeech = false;
+                                try {
+                                    recognition.start();
+                                    document.body.classList.add('listening');
+                                } catch (e) {
+                                    console.error('Error restarting recognition:', e);
+                                }
+                            }, 500);
+                        }
+                    };
+                }
+            }
+            
+            // Send message to multi-tenant server
+            // Start listening function (required by event listeners)
+            function startListening() {
+                window.pauseRecognition = false;
+                if (!isConnected) {
+                    updateStatus(speechStatus, 'Please connect first', 'warning');
+                    return;
+                }
+                
+                if (recognition && !isListening) {
+                    try {
+                        recognition.start();
+                        isListening = true;
+                        startButton.disabled = true;
+                        stopButton.disabled = false;
+                        document.body.classList.add('listening');
+                        updateStatus(speechStatus, 'Listening...', 'info');
+                    } catch (e) {
+                        console.error('Error starting speech recognition:', e);
+                        updateStatus(speechStatus, `Error: ${e.message}`, 'error');
+                    }
+                }
+            }
+            
+            // Function to handle interruptions while agent is speaking
+            function interruptAndListen() {
+                console.log('Interrupt requested while agent is speaking');
+                
+                // Stop any currently playing audio
+                if (window.currentAudio) {
+                    window.currentAudio.pause();
+                    console.log('Paused current audio playback');
+                }
+                
+                // Start listening for interruption
+                if (!window.interruptRecognition) {
+                    setupInterruptRecognition();
+                }
+                
+                try {
+                    window.interruptRecognition.start();
+                    updateStatus(speechStatus, 'Listening for interruption...', 'info');
+                    document.body.classList.add('interrupting');
+                } catch (e) {
+                    console.error('Error starting interrupt recognition:', e);
+                }
+            }
+            
+            // Setup interrupt recognition
+            function setupInterruptRecognition() {
+                if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    const interruptRecognition = new SpeechRecognition();
+                    
+                    interruptRecognition.continuous = false;
+                    interruptRecognition.interimResults = true;
+                    
+                    interruptRecognition.onresult = function(event) {
+                        const transcript = Array.from(event.results)
+                            .map(result => result[0])
+                            .map(result => result.transcript)
+                            .join('');
+                        
+                        console.log('Interrupt detected:', transcript);
+                        updateStatus(speechStatus, `Interruption: ${transcript}`, 'info');
+                        
+                        // Send interruption to backend
+                        if (event.results[0].isFinal) {
+                            // Send message with interruption flag
+                            sendMessageToMultiTenant(transcript, true);
+                            stopInterruptListening();
+                        }
+                    };
+                    
+                    interruptRecognition.onend = function() {
+                        document.body.classList.remove('interrupting');
+                        updateStatus(speechStatus, 'Interruption handling complete', 'info');
+                    };
+                    
+                    interruptRecognition.onerror = function(event) {
+                        console.error('Interrupt recognition error:', event.error);
+                        document.body.classList.remove('interrupting');
+                    };
+                    
+                    window.interruptRecognition = interruptRecognition;
+                    console.log('Interrupt recognition setup complete');
+                }
+            }
+            
+            // Stop interrupt listening
+            function stopInterruptListening() {
+                if (window.interruptRecognition) {
+                    try {
+                        window.interruptRecognition.stop();
+                    } catch (e) {
+                        console.error('Error stopping interrupt recognition:', e);
+                    }
+                    document.body.classList.remove('interrupting');
+                }
+            }
+            
+            // Stop listening function (required by event listeners)
+            function stopListening() {
+                window.pauseRecognition = true;
+                
+                if (recognition && isListening) {
+                    recognition.stop();
+                }
+                
+                isListening = false;
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                document.body.classList.remove('listening');
+                updateStatus(speechStatus, 'Stopped listening', 'info');
+                
+                // Clear any pending silence timers
+                if (window.silenceTimer) {
+                    clearTimeout(window.silenceTimer);
+                    window.silenceTimer = null;
+                }
+            }
+            
+            // Function to add API base URL
+            function getApiEndpoint(endpoint) {
+                // Direct endpoint connection to backend
+                return endpoint; // The backend already has these routes configured
+            }
+            
+            // Initialize voice service
+            function initVoiceService() {
+                console.log('Initializing voice service to use langgraph API endpoint');
+                // No local initialization needed as we're using the API
+                return true;
+            }
+            
+            // Function to make the agent speak using the langgraph API endpoint
+            function makeAgentSpeak(text, agentType, isInterruption = false) {
+                // Make function available globally
+                window.makeAgentSpeak = makeAgentSpeak;
+                
+                // Safety check for empty text
+                if (!text) {
+                    console.warn('Empty text provided to makeAgentSpeak');
+                    return;
+                }
+                
+                console.log(`Requesting speech from API (${agentType}): ${text}`);
+                document.body.classList.add('speaking');
+                
+                // Make API call to get speech using existing local-tts endpoint
+                fetch(getApiEndpoint('/local-tts'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        voice: agentType === 'billing' ? 'alloy' : 'echo'
+                    })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Speech API response:', data);
+                    
+                    // Play audio if audio_file is provided
+                    if (data.audio_file) {
+                        playAudioFromUrl(data.audio_file);
+                    } else {
+                        console.warn('No audio file received from API');
+                        document.body.classList.remove('speaking');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error getting speech from API:', error);
+                    document.body.classList.remove('speaking');
+                    
+                    // Fallback to notification if API fails
+                    updateStatus(speechStatus, 'Speech API error: ' + error.message, 'error');
+                });
+            }
+            
+            // Function to play audio from URL
+            function playAudioFromUrl(url) {
+                console.log('Playing audio from URL:', url);
+                
+                // Add timestamp to URL to prevent caching issues
+                const timestampedUrl = url + '?t=' + new Date().getTime();
+                console.log('Using timestamped URL:', timestampedUrl);
+                
+                // Stop any currently playing audio first
+                if (window.currentAudio) {
+                    console.log('Stopping current audio before playing new one');
+                    window.currentAudio.pause();
+                    window.currentAudio = null;
+                }
+                
+                // Create audio element
+                const audio = new Audio();
+                
+                // Set up event listeners before setting the source
+                audio.onloadedmetadata = () => {
+                    console.log('Audio metadata loaded, duration:', audio.duration);
+                };
+                
+                audio.oncanplay = () => {
+                    console.log('Audio can play, starting playback');
+                    // Only try to play after it's ready
+                    audio.play().catch(error => {
+                        console.error('Error playing audio after canplay event:', error);
+                        document.body.classList.remove('speaking');
+                    });
+                };
+                
+                audio.onplay = () => {
+                    console.log('Started playing audio');
+                    document.body.classList.add('speaking');
+                };
+                
+                audio.onended = () => {
+                    console.log('Finished playing audio');
+                    document.body.classList.remove('speaking');
+                    window.currentAudio = null;
+                };
+                
+                audio.onerror = (event) => {
+                    console.error('Audio playback error:', event);
+                    console.error('Error details:', audio.error ? `Code: ${audio.error.code}, Message: ${audio.error.message}` : 'Unknown error');
+                    document.body.classList.remove('speaking');
+                    window.currentAudio = null;
+                    
+                    // Try alternative approach after error
+                    console.log('Trying alternative audio playback method...');
+                    fetch(timestampedUrl)
+                        .then(response => {
+                            console.log('Fetch response:', response.status, response.statusText);
+                            if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+                            return response.blob();
+                        })
+                        .then(blob => {
+                            console.log('Audio blob received:', blob.type, blob.size, 'bytes');
+                            const objectUrl = URL.createObjectURL(blob);
+                            const newAudio = new Audio(objectUrl);
+                            newAudio.play().catch(e => console.error('Error playing from blob:', e));
+                        })
+                        .catch(error => console.error('Error fetching audio:', error));
+                };
+                
+                // Store reference to current audio
+                window.currentAudio = audio;
+                
+                // Set the source and load the audio
+                audio.src = timestampedUrl;
+                console.log('Loading audio from:', audio.src);
+                audio.load();
+            }
+            
+            // No longer needed as we're using the API for voice selection
+            
+            // Safe update status element function
+            function updateStatus(element, message, type = 'info') {
+                // Safety check - if element doesn't exist, log and exit
+                if (!element) {
+                    console.warn('Status element not found when trying to update with:', message);
+                    return;
+                }
+                
+                // Update element with message
+                element.textContent = message;
+                element.className = 'status';
+                element.classList.add(type);
+            }
+            
+            // Add a message to the conversation
+            function addMessage(message, type) {
+                // Make function available globally
+                window.addMessage = addMessage;
+                console.log(`Adding message: ${message}, type: ${type}`);
+                
+                // Get or create conversation container
+                let conversationContainer = document.getElementById('conversation');
+                if (!conversationContainer) {
+                    console.warn('Conversation container not found, creating one');
+                    conversationContainer = document.createElement('div');
+                    conversationContainer.id = 'conversation';
+                    conversationContainer.className = 'conversation';
+                    document.querySelector('.container').appendChild(conversationContainer);
+                }
+                
+                // Create message element
+                const messageElement = document.createElement('div');
+                messageElement.className = `message ${type}`;
+                
+                // Create badge element
+                const badgeElement = document.createElement('span');
+                badgeElement.className = 'badge';
+                badgeElement.textContent = type === 'user' ? 'You' : type === 'agent' ? currentAgentType : 'System';
+                
+                // Create text element
+                const textElement = document.createElement('span');
+                textElement.className = 'text';
+                textElement.textContent = message;
+                
+                // Append badge and text to message
+                messageElement.appendChild(badgeElement);
+                messageElement.appendChild(textElement);
+                
+                // Append message to conversation
+                conversationContainer.appendChild(messageElement);
+                
+                // Scroll to bottom
+                conversationContainer.scrollTop = conversationContainer.scrollHeight;
+            }
+            
+            // Send a message to the multi-tenant system
+            async function sendMessageToMultiTenant(messageOverride, isInterruption = false) {
+                // Get message from input, override, or speech recognition
+                const message = messageOverride || messageInput.value.trim();
+                
+                if (!message) {
+                    console.warn('No message to send');
+                    return;
+                }
+                
+                // Clear input if not an interruption
+                if (!isInterruption && messageInput) {
+                    messageInput.value = '';
+                }
+                
+                // Check if we're connected
+                if (!currentSessionId || !currentCustomerId) {
+                    console.error('Not connected to multi-tenant system');
+                    updateStatus(agentStatus, 'Not connected', 'error');
+                    return;
+                }
+                
+                // Make API call to send message
+                const data = {
+                    customer_id: currentCustomerId,
+                    session_id: currentSessionId,
+                    message: message,
+                    agent_type: currentAgentType,
+                    is_interruption: isInterruption // Add flag for interruptions
+                };
+                
+                console.log('Sending message to multi-tenant:', data);
+                
+                // Update UI
+                if (agentStatus) {
+                    agentStatus.textContent = 'Sending message...';
+                    agentStatus.className = 'status info';
+                }
+                
+                fetch(getApiEndpoint('/multi-tenant-message'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const statusElement = document.getElementById('agentStatus') || document.querySelector('.status');
+                    
+                    // Set agent type if provided in the response
+                    if (data.agent_type && data.agent_type !== currentAgentType) {
+                        console.log(`Agent type changed from ${currentAgentType} to ${data.agent_type}`);
+                        currentAgentType = data.agent_type;
+                        updateAgentInfo(currentAgentType);
+                        
+                        // Add transfer message
+                        addMessage(`Transferring to ${data.agent_type} agent...`, 'system');
+                    }
+                    
+                    if (data.success) {
+                        // Update status
+                        updateStatus(statusElement, 'Message sent successfully', 'success');
+                        
+                        // Add the agent's response to the conversation
+                        addMessage(data.response, 'agent');
+                        
+                        // Make the agent speak with the current agent type
+                        makeAgentSpeak(data.response, currentAgentType, isInterruption);
+                    } else {
+                        // Handle error safely
+                        console.error('API Error:', data.error);
+                        if (statusElement) {
+                            statusElement.textContent = `Error: ${data.error}`;
+                            statusElement.className = 'status error';
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error sending message:', error);
+                    const statusElement = document.getElementById('agentStatus') || document.querySelector('.status');
+                    if (statusElement) {
+                        statusElement.textContent = `Error: ${error.message}`;
+                        statusElement.className = 'status error';
+                    }
+                });
+            }
+            
+            // Generate random ID
+            function generateId(prefix = '') {
+                return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+            }
+            
+            // Connect to multi-tenant system
+            function connectToMultiTenant() {
+                try {
+                    console.log('Connect function called');
+                    
+                    // Safe reference to DOM elements - try multiple ways to get elements
+                    const statusElement = window.agentStatus || document.getElementById('agentStatus') || document.querySelector('.status');
+                    const customerIdElement = window.customerIdInput || document.getElementById('customerIdInput');
+                    const connectBtn = window.connectButton || document.getElementById('connectButton');
+                    const disconnectBtn = window.disconnectButton || document.getElementById('disconnectButton');
+                    
+                    // Log element references for debugging
+                    console.log('Status element:', statusElement);
+                    console.log('Customer ID element:', customerIdElement);
+                    console.log('Connect button:', connectBtn);
+                    
+                    // Get customer ID or generate a new one
+                    const customerId = (customerIdElement && customerIdElement.value && customerIdElement.value.trim()) || generateId('customer');
+                    
+                    // Generate a better unique session ID
+                    const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+                    
+                    // Log debug info
+                    console.log('Connecting with customer ID:', customerId);
+                    console.log('Session ID:', sessionId);
+                    
+                    // Update UI for connecting state
+                    if (statusElement) {
+                        statusElement.textContent = 'Connecting...';
+                        statusElement.className = 'status info';
+                    } else {
+                        console.error('No status element found for updating status!');
+                    }
+                    
+                    // Disable buttons during connection
+                    if (connectBtn) connectBtn.disabled = true;
+                    if (disconnectBtn) disconnectBtn.disabled = true;
+                    
+                    // Use the correct endpoint
+                    const connectionEndpoint = '/multi-tenant-connect';
+                    console.log('Connecting to endpoint:', connectionEndpoint);
+                    
+                    return fetch(getApiEndpoint(connectionEndpoint), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        customer_id: customerId,
+                        session_id: sessionId
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        currentCustomerId = customerId;
+                        currentSessionId = sessionId;
+                        isConnected = true;
+                        
+                        // Update UI for connected state
+                        updateStatus(agentStatus, 'Connected', 'success');
+                        connectButton.disabled = true;
+                        disconnectButton.disabled = false;
+                        sessionIdSpan.textContent = currentSessionId;
+                        customerIdSpan.textContent = currentCustomerId;
+                        
+                        // Automatically start continuous listening
+                        window.pauseRecognition = false;
+                        window.isProcessingSpeech = false;
+                        try {
+                            // Start speech recognition automatically
+                            if (recognition) {
+                                recognition.start();
+                                isListening = true;
+                                startButton.disabled = true;
+                                stopButton.disabled = false;
+                                document.body.classList.add('listening');
+                                updateStatus(speechStatus, 'Listening automatically...', 'info');
+                            }
+                        } catch (e) {
+                            console.error('Error starting automatic speech recognition:', e);
+                        }
+                    } else {
+                        updateStatus(agentStatus, `Error: ${data.error}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error connecting:', error);
+                    const statusElement = document.getElementById('agentStatus') || document.querySelector('.status');
+                    if (statusElement) {
+                        statusElement.textContent = `Error: ${error.message}`;
+                        statusElement.className = 'status error';
+                    } else {
+                        console.error('No status element found for error message:', error.message);
+                    }
+                    
+                    // Re-enable connect button
+                    const connectBtn = document.getElementById('connectButton');
+                    if (connectBtn) connectBtn.disabled = false;
+                });
+                } catch (error) {
+                    console.error('Error in connectToMultiTenant:', error);
+                    const statusElement = document.getElementById('agentStatus') || document.querySelector('.status');
+                    if (statusElement) {
+                        statusElement.textContent = `Error: ${error.message}`;
+                        statusElement.className = 'status error';
+                    }
+                }
+            }
+            
+            // Disconnect from multi-tenant system
+            function disconnectFromMultiTenant() {
+                // Update UI for disconnecting state
+                updateStatus(agentStatus, 'Disconnecting...', 'info');
+                connectButton.disabled = false;
+                disconnectButton.disabled = true;
+                
+                fetch(getApiEndpoint('/multi-tenant-disconnect'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        customer_id: currentCustomerId,
+                        session_id: currentSessionId
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        isConnected = false;
+                        
+                        // Update UI for disconnected state
+                        updateStatus(agentStatus, 'Disconnected', 'info');
+                        connectButton.disabled = false;
+                        disconnectButton.disabled = true;
+                        sessionIdSpan.textContent = 'Not connected';
+                        customerIdSpan.textContent = 'Unknown';
+                    } else {
+                        updateStatus(agentStatus, `Error: ${data.error}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error disconnecting:', error);
+                    updateStatus(agentStatus, `Error: ${error.message}`, 'error');
+                });
+            }
+            
+            // Send message from the form input
+            function sendMessage() {
+                const message = messageInput.value.trim();
+                if (message && currentSessionId) {
+                    // Add to conversation
+                    addMessage(message, 'user');
+                    // Clear input
+                    messageInput.value = '';
+                    // Send to server
+                    sendMessageToMultiTenant(message);
+                } else if (!currentSessionId) {
+                    updateStatus(agentStatus, 'Please connect first', 'warning');
+                } else {
+                    updateStatus(agentStatus, 'Please enter a message', 'warning');
+                }
+            }
+            
+            // Helper function to capitalize first letter
+            function capitalizeFirstLetter(string) {
+                return string.charAt(0).toUpperCase() + string.slice(1);
+            }
+            
+            // Update agent info UI
+            function updateAgentInfo(agentType) {
+                // Clear previous
+                agentInfo.innerHTML = '';
+                
+                // Create avatar
+                const avatar = document.createElement('div');
+                avatar.className = `agent-avatar ${agentType}`;
+                avatar.textContent = agentType.charAt(0).toUpperCase();
+                
+                // Create info
+                const info = document.createElement('div');
+                
+                const title = document.createElement('h3');
+                title.style.margin = '0';
+                title.textContent = `${capitalizeFirstLetter(agentType)} Agent`;
+                
+                const desc = document.createElement('p');
+                desc.style.margin = '0';
+                
+                switch(agentType) {
+                    case 'greeter':
+                        desc.textContent = 'Starting agent for all conversations';
+                        break;
+                    case 'technical':
+                        desc.textContent = 'Handles technical issues and troubleshooting';
+                        break;
+                    case 'billing':
+                        desc.textContent = 'Helps with payment and subscription questions';
+                        break;
+                    case 'general':
+                        desc.textContent = 'Provides general information and assistance';
+                        break;
+                    case 'escalation':
+                        desc.textContent = 'Handles complex issues that need special attention';
+                        break;
+                    default:
+                        desc.textContent = 'Voice agent assistant';
+                }
+                
+                info.appendChild(title);
+                info.appendChild(desc);
+                
+                // Add to container
+                agentInfo.appendChild(avatar);
+                agentInfo.appendChild(info);
+            }
+            
+            function init() {
+                // Initialize speech recognition
+                initSpeechRecognition();
+                
+                // Add event listeners
+                startButton.addEventListener('click', startListening);
+                stopButton.addEventListener('click', stopListening);
+                messageInput.addEventListener('keyup', function(event) {
+                    if (event.key === 'Enter') {
+                        sendMessage();
+                    }
+                });
+                sendButton.addEventListener('click', sendMessage);
+                
+                // Add direct event listeners without conditionals
+                connectButton.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    console.log('Connect button clicked');
+                    try {
+                        connectToMultiTenant();
+                    } catch (error) {
+                        console.error('Connection error:', error);
+                        if (agentStatus) {
+                            updateStatus(agentStatus, 'Connection error: ' + error.message, 'error');
+                        }
+                    }
+                });
+                
+                disconnectButton.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    console.log('Disconnect button clicked');
+                    try {
+                        disconnectFromMultiTenant();
+                    } catch (error) {
+                        console.error('Disconnection error:', error);
+                        if (agentStatus) {
+                            updateStatus(agentStatus, 'Disconnection error: ' + error.message, 'error');
+                        }
+                    }
+                });
+                
+                messageInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        sendButton.click();
+                    }
+                });
+                
+                presetButton.addEventListener('click', function() {
+                    const selectedOption = presetSelect.options[presetSelect.selectedIndex];
+                    if (selectedOption.value) {
+                        const message = selectedOption.text;
+                        // Add user message to conversation
+                        addMessage(message, 'user');
+                        // Send to multi-tenant system
+                        sendMessageToMultiTenant(message);
+                        presetSelect.selectedIndex = 0;
+                    }
+                });
+                
+                connectButton.addEventListener('click', connectToMultiTenant);
+                disconnectButton.addEventListener('click', disconnectFromMultiTenant);
+                
+                // Only add interruptButton listener if the element exists
+                if (interruptButton) {
+                    interruptButton.addEventListener('click', interruptAndListen);
+                } else {
+                    console.warn('Interrupt button not found, skipping listener setup');
+                }
+                
+                // Setup keyboard shortcut for interruption (Space key)
+                document.addEventListener('keydown', function(event) {
+                    // Space key triggers interruption while agent is speaking
+                    if (event.code === 'Space' && window.currentAudio) {
+                        event.preventDefault(); // Prevent page scrolling
+                        console.log('Interruption triggered via Space key');
+                        interruptAndListen();
+                    }
+                });
+            }
+            
+            // Create DOM references if they don't exist
+            function ensureDOMReferences() {
+                console.log('Ensuring all DOM references exist...');
+                
+                // Empty arrays to collect missing elements
+                const missingElements = [];
+                
+                // Check and define key UI elements if not already defined
+                if (!window.connectButton) {
+                    window.connectButton = document.getElementById('connectButton');
+                    if (!window.connectButton) missingElements.push('connectButton');
+                }
+                
+                if (!window.disconnectButton) {
+                    window.disconnectButton = document.getElementById('disconnectButton');
+                    if (!window.disconnectButton) missingElements.push('disconnectButton');
+                }
+                
+                if (!window.customerIdInput) {
+                    window.customerIdInput = document.getElementById('customerId');
+                    if (!window.customerIdInput) missingElements.push('customerId');
+                }
+                
+                if (!window.messageInput) {
+                    window.messageInput = document.getElementById('messageInput');
+                    if (!window.messageInput) missingElements.push('messageInput');
+                }
+                
+                if (!window.sendButton) {
+                    window.sendButton = document.getElementById('sendButton');
+                    if (!window.sendButton) missingElements.push('sendButton');
+                }
+                
+                if (!window.agentStatus) {
+                    window.agentStatus = document.getElementById('agentStatus');
+                    // Create element if missing
+                    if (!window.agentStatus) {
+                        console.warn('Creating missing agentStatus element');
+                        const statusElement = document.createElement('div');
+                        statusElement.id = 'agentStatus';
+                        statusElement.className = 'status';
+                        statusElement.textContent = 'Ready';
+                        document.querySelector('.container').appendChild(statusElement);
+                        window.agentStatus = statusElement;
+                    }
+                }
+                
+                if (!window.speechStatus) {
+                    window.speechStatus = document.getElementById('speechStatus');
+                    if (!window.speechStatus) missingElements.push('speechStatus');
+                }
+                
+                if (!window.agentInfo) {
+                    window.agentInfo = document.getElementById('agentInfo');
+                    if (!window.agentInfo) missingElements.push('agentInfo');
+                }
+                
+                if (!window.messagesContainer) {
+                    window.messagesContainer = document.getElementById('messages');
+                    if (!window.messagesContainer) missingElements.push('messages');
+                }
+                
+                if (!window.startButton) {
+                    window.startButton = document.getElementById('startButton');
+                    if (!window.startButton) missingElements.push('startButton');
+                }
+                
+                if (!window.stopButton) {
+                    window.stopButton = document.getElementById('stopButton');
+                    if (!window.stopButton) missingElements.push('stopButton');
+                }
+                
+                if (!window.stopAudioBtn) {
+                    window.stopAudioBtn = document.getElementById('stopAudioBtn');
+                    if (!window.stopAudioBtn) missingElements.push('stopAudioBtn');
+                }
+                
+                // Log missing elements
+                if (missingElements.length > 0) {
+                    console.warn('Missing DOM elements:', missingElements.join(', '));
+                }
+                
+                // Add connect button event listener directly (again) to ensure it works
+                if (window.connectButton) {
+                    console.log('Adding fail-safe event listener to connect button');
+                    window.connectButton.onclick = function(e) {
+                        if (e) e.preventDefault();
+                        console.log('Connect button clicked (fail-safe handler)');
+                        try {
+                            connectToMultiTenant();
+                        } catch (error) {
+                            console.error('Connection error (fail-safe):', error);
+                        }
+                        return false;
+                    };
+                }
+            }
+            
+            // Initialize voice service
+            initVoiceService();
+            
+            // Run once on DOM loaded
+            init();
+            
+            // Final safety check to make sure all elements are defined
+            ensureDOMReferences();
+            
+            // Initialize the audio controls
+            if (stopAudioBtn) {
+                stopAudioBtn.addEventListener('click', function() {
+                    stopAllAudio();
+                });
+            }
+            
+            // Stop all audio playback
+            function stopAllAudio() {
+                const audioElements = document.querySelectorAll('audio');
+                audioElements.forEach(audio => {
+                    audio.pause();
+                    audio.currentTime = 0;
+                });
+                // Clear the queue
+                audioQueue.length = 0;
+                isPlaying = false;
+                updateStatus(agentStatus, 'Audio stopped', 'warning');
+                document.body.classList.remove('audio-playing');
+            }
+            
+            // Setup speech detection for interruption
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                // Create always-on speech recognition for interruption
+                const interruptRecognition = new (window.webkitSpeechRecognition || window.SpeechRecognition)();
+                interruptRecognition.continuous = true;
+                interruptRecognition.interimResults = true;
+                
+                // Set up special audio interruption detection
+                interruptRecognition.onresult = function(event) {
+                    const isAudioPlaying = document.querySelectorAll('audio').length > 0 || isPlaying;
+                    if (isAudioPlaying) {
+                        console.log('Speech detected during audio playback - interrupting!');
+                        // Call the handleSpeechInterruption function from the helper file
+                        if (typeof window.handleSpeechInterruption === 'function') {
+                            window.handleSpeechInterruption();
+                        } else {
+                            console.error('handleSpeechInterruption function not found');
+                        }
+                        interruptRecognition.stop(); // Stop the always-on recognition temporarily
+                    }
+                };
+                
+                // Restart the interrupt recognition when it ends
+                interruptRecognition.onend = function() {
+                    // Only restart if we're not already in a regular listening session
+                    if (!document.body.classList.contains('listening')) {
+                        setTimeout(() => {
+                            try {
+                                interruptRecognition.start();
+                                console.log('Interrupt recognition restarted');
+                            } catch (e) {
+                                console.error('Error restarting interrupt recognition:', e);
+                            }
+                        }, 1000);
+                    }
+                };
+                
+                // Start the interrupt recognition
+                try {
+                    interruptRecognition.start();
+                    console.log('Always-on interrupt recognition started');
+                } catch (e) {
+                    console.error('Error starting interrupt recognition:', e);
+                }
+                
+                // Save it for cleanup
+                window.interruptRecognition = interruptRecognition;
+            }
+        });
+    </script>
+</body>
+</html>
